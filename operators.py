@@ -140,6 +140,7 @@ class LOAD_OT_load_data(Operator, ImportHelper):
 class TRACK_OT_track_head(Operator):
     bl_idname = "track.head" 
     bl_label = "tracks head rotation" 
+	bl_options = {'UNDO'}
 
     def execute(self, context):
         print('new run')

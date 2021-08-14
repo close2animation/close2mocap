@@ -181,7 +181,7 @@ class TRACK_OT_track_head(Operator):
 
         for face in faces:
             # define point to track
-            verts = np.array([face[168] ,face[33]])
+            verts = np.array([face[6] ,face[133]])
             target = np.array([1,0])
 
             # facing z
@@ -198,8 +198,32 @@ class TRACK_OT_track_head(Operator):
             verts_transformed, rotation_x = rotate_along_axis(verts, 0, 1, target)
             verts[:, 1] = verts_transformed[:, 0]
             verts[:, 2] = verts_transformed[:, 1]
+
+            rot_left = np.array([rotation_x, rotation_y, rotation_z])
+
+            # again to average
+            verts = np.array([face[6] ,face[362]])
+            target = np.array([1,0])
+
+            # facing z
+            verts_transformed, rotation_z = rotate_along_axis(verts, 2, 0, target)
+            verts[:, 0] = verts_transformed[:, 0]
+            verts[:, 1] = verts_transformed[:, 1]
+
+            # facing y
+            verts_transformed, rotation_y = rotate_along_axis(verts, 1, 0, target)
+            verts[:, 0] = verts_transformed[:, 0]
+            verts[:, 2] = verts_transformed[:, 1]
+
+            # facing x
+            verts_transformed, rotation_x = rotate_along_axis(verts, 0, 1, target)
+            verts[:, 1] = verts_transformed[:, 0]
+            verts[:, 2] = verts_transformed[:, 1]
+
+            rot_right = np.array([rotation_x, rotation_y, rotation_z])
+            rot = (rot_right + rot_left)/2
             
-            rotation.append([rotation_x, rotation_y, rotation_z])
+            rotation.append([rot[0], rot[1], rot[2]])
         
         rotation = np.array(rotation)
         print(rotation)

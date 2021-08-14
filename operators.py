@@ -23,10 +23,38 @@ def create_folder(dir, folder_name):
     return path 
 
 
+def smooth_curve(object_name, transform_type='location', axis=2, kernel_size=10):
+    '''applys a simple smoothing average to a f-curve'''
+
+    obj = bpy.data.objects[object_name]
+
+    # refernce axis and data path (eg. location)
+    for fcurve in obj.animation_data.action.fcurves:
+        if fcurve.data_path == transform_type and fcurve.array_index == axis:
+            keyframes = fcurve.keyframe_points  
+
+    # take values from keyframes so we can process them
+    data_array = []
+    for frame in keyframes:
+        data_array.append([frame.co[0], frame.co[1]])
+    data_array = np.array(data_array)
+
+    # calculate simple moving average
+    weights = np.repeat(1.0, kernel_size)/kernel_size
+    sma = np.convolve(data_array[:, 1], weights, 'valid')
+
+    # replace old values with new ones
+    start = int(kernel_size/2)
+    print(start)
+    for idx, keyframe in enumerate(keyframes[start:-start]):
+        keyframes.insert(keyframe.co[0], sma[idx], options={'FAST'}, keyframe_type='KEYFRAME')
+
+
 class My_settings(bpy.types.PropertyGroup):
     view_result : bpy.props.BoolProperty(name='view result', default=True)
-    fps: bpy.props.FloatProperty(name="FPS", default=24.0)
-    scale: bpy.props.FloatProperty(name="video scale", default=.75)
+    fps: bpy.props.FloatProperty(name="FPS", default=24.0, min=0, max=60)
+    scale: bpy.props.FloatProperty(name="video scale", default=.75, min=0, max=1)
+    smoothing: bpy.props.IntProperty(name="smoothing", default=10, min=0, max=30) 
 
 
 class LOAD_OT_load_data(Operator, ImportHelper): 
@@ -177,7 +205,6 @@ class TRACK_OT_track_head(Operator):
         print(rotation)
         rotation = rotation - rotation[0]
         print(np.degrees(rotation))
-
         
         bpy.ops.mesh.primitive_cube_add()   
         bpy.context.active_object.name = 'head_rotation'
@@ -187,7 +214,12 @@ class TRACK_OT_track_head(Operator):
             obj.rotation_euler[1] = rot[1]
             obj.rotation_euler[2] = rot[2]
             obj.keyframe_insert(data_path="rotation_euler", frame=idx)
-         
+
+        my_tool = context.scene.my_tool 
+        smooth_curve('head_rotation', 'rotation_euler', 0, my_tool.smoothing)
+        smooth_curve('head_rotation', 'rotation_euler', 1, my_tool.smoothing)
+        smooth_curve('head_rotation', 'rotation_euler', 2, my_tool.smoothing)
+
         return {'FINISHED'} 
 
 
@@ -204,8 +236,10 @@ class VIEW3D_PT_value(bpy.types.Panel):
         row.prop(my_tool, "fps")
         row.prop(my_tool, "scale")
         row.prop(my_tool, "view_result")
+        row.prop(my_tool, "smoothing")
 
         self.layout.operator('load.load_data', text='select mp4 file')
         self.layout.operator('track.head', text='track head rotation')
+        
 
         

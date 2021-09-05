@@ -25,7 +25,7 @@ import imp
 bl_info = {
     "name" : "close2mocap",
     "author" : "manuel acevedo",
-    "description" : "an addon that uses google mediapipe to track head rotation. more features coming soon...ish",
+    "description" : "an addon that uses mediapipe to track head rotation. more features coming soon...ish",
     "blender" : (2, 80, 0),
     "version" : (0, 0, 1),
     "location" : "",
@@ -56,9 +56,13 @@ from .operators import  *
 
 classes = (
     My_settings,
-    LOAD_OT_load_data,
+    TRACK_OT_load_data,
     VIEW3D_PT_value,
-    TRACK_OT_track_head
+    TRACK_OT_track_head,
+    TRACK_OT_track_mouth,
+    TRACK_OT_track_blinks,
+    TRACK_OT_track_eyes,
+    TRACK_OT_track_fingers
 ) 
 
 

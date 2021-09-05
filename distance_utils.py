@@ -41,16 +41,19 @@ def nothing(x):
     pass
 
 
-def get_shape(landmarks, verts_idx, mask):
+def get_shape(landmarks, verts_idx, mask, kx, ky):
     ''' use the face verts to create a shape for the mask'''
     points = [landmarks[idx] for idx in verts_idx]
-    mask = cv2.fillConvexPoly(mask, np.array(points), 255)
-
-    #kernel = np.ones((7, 3), np.uint8)
-    #mask = cv2.erode(mask, kernel)
+    points = np.array(points)[:, :2]
+    points[:, 0] *= mask.shape[1]
+    points[:, 1] *= mask.shape[0]
+    points = points.astype(int)
+    mask = cv2.fillConvexPoly(mask, points, 255)
+    
+    kernel = np.ones((kx, ky), np.uint8)
+    mask = cv2.erode(mask, kernel)
  
     return mask
-
 
 def find_eye_centre(contours, idx):
     ''' finds the centre of the contour'''

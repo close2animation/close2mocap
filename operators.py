@@ -179,7 +179,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
         my_tool.video_path = video_path
 
         # need to change this to: if not video_path.split('.')[0] in list_with_valid_video_formats: pick correct format
-        if not video_path.split('.')[1] == 'mp4':
+        if not video_path.split('.')[-1] == 'mp4':
             print('select a mp4 file')
         
         else:

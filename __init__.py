@@ -36,12 +36,17 @@ bl_info = {
 def install_libs(): 
     ensurepip.bootstrap()
     os.environ.pop("PIP_REQ_TRACKER", None)
+	
+    # forcing the path cause i can
+    path = sys.executable
+    path = path.split('bin')[0]
+    path = path + 'lib\site-packages'
 
-    subprocess.check_output([bpy.app.binary_path_python, '-m', 'pip', 'install', 'opencv-python'])
-    subprocess.check_output([bpy.app.binary_path_python, '-m', 'pip', 'install', 'mediapipe'])
-    subprocess.check_output([bpy.app.binary_path_python, '-m', 'pip', 'install', '--ignore-installed', 'six'])
-    subprocess.check_output([bpy.app.binary_path_python, '-m', 'pip', 'install', '--ignore-installed', 'attrs'])
-    subprocess.check_output([bpy.app.binary_path_python, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'opencv-python'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'mediapipe'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'six'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'attrs'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib'])
     return {'FINISHED'}   
 
 try:

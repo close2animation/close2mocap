@@ -50,7 +50,7 @@ def install_libs():
     return {'FINISHED'}   
 
 try:
-	imp.find_module('mediapipe')
+    imp.find_module('mediapipe')
 
 except ImportError:
     install_libs()

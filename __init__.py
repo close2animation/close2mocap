@@ -17,6 +17,7 @@ Copyright 2021 Manuel Acevedo
 
 
 import bpy
+import sys
 import subprocess
 import ensurepip
 import os

@@ -43,11 +43,11 @@ def install_libs():
     path = path.split('bin')[0]
     path = path + 'lib\site-packages'
 
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'opencv-python'])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'mediapipe'])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'six'])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'attrs'])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib'])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'opencv-python', '-t', path])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'mediapipe', '-t', path])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'six', '-t', path])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'attrs', '-t', path])
+    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib', '-t', path])
     return {'FINISHED'}   
 
 try:

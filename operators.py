@@ -75,6 +75,10 @@ class My_settings(bpy.types.PropertyGroup):
     cutoff: bpy.props.IntProperty(name="smoothing", default=127) 
     kernely: bpy.props.IntProperty(name="cutoff", default=1) 
     kernelx: bpy.props.IntProperty(name="cutoff", default=1)
+    lock_fps : bpy.props.BoolProperty(name='lock fps', default=False)
+    t_hand : bpy.props.BoolProperty(name='track hand', default=True)
+    t_head : bpy.props.BoolProperty(name='track head', default=True)
+    t_pose : bpy.props.BoolProperty(name='track pose', default=True)
 
 
 class TRACK_OT_load_data(Operator, ImportHelper):  
@@ -86,11 +90,10 @@ class TRACK_OT_load_data(Operator, ImportHelper):
 
 
     def load_mp_tools(self):
-        self.mp_drawing = mp.solutions.drawing_utils 
         self.mp_face_mesh = mp.solutions.face_mesh
         self.mp_hands = mp.solutions.hands
         self.mp_pose = mp.solutions.pose     
-        self.face_mesh = self.mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) 
+        self.face_mesh = self.mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5, refine_landmarks=True) 
         self.hands = self.mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.8)
         self.pose = self.mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
@@ -104,7 +107,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
             bpy.ops.object.empty_add(type='PLAIN_AXES')
             obj = bpy.context.active_object
             obj.name = name + '_' + str(idx) 
-                  
+
 
     def save_landmarks_xyz_to_empties(self, landmarks, name, frame):
         try:
@@ -117,38 +120,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                 obj.keyframe_insert(data_path="location", frame=frame)
         except:
             pass
-   
-   
-    def draw_results(self, img, face_results, hand_results, pose_results):
-
-        if face_results.multi_face_landmarks:      
-            self.mp_drawing.draw_landmarks(
-                img,
-                face_results.multi_face_landmarks[0],
-                self.mp_face_mesh.FACE_CONNECTIONS)
-            
-        if hand_results.multi_hand_landmarks:  
-            self.mp_drawing.draw_landmarks(
-                img,
-                hand_results.multi_hand_landmarks[0],
-                self.mp_hands.HAND_CONNECTIONS)
-            try:
-                self.mp_drawing.draw_landmarks(
-                    img,
-                    hand_results.multi_hand_landmarks[1],
-                    self.mp_hands.HAND_CONNECTIONS)  
-            except:
-                pass 
-
-        if pose_results.pose_landmarks:          
-            self.mp_drawing.draw_landmarks(
-                img,
-                pose_results.pose_landmarks,
-                self.mp_pose.POSE_CONNECTIONS)     
-                    
-        cv2.imshow('result', img)
-        cv2.waitKey(1)  
-        
+                  
     
     def loop_through(self, operation, landmark_list, name, frame):
         '''
@@ -165,6 +137,30 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                     operation(landmarks, name[idx], frame)
             except IndexError:
                 pass
+
+    
+    def create_camera(self, video_path):    
+        bpy.ops.object.camera_add()
+        bpy.data.scenes['Scene'].render.resolution_x = 1000
+        bpy.data.scenes['Scene'].render.resolution_y = 1000
+        camera = bpy.context.active_object
+        camera.name = 'visualise points'
+        camera.location[0] = .5
+        camera.location[1] = .5
+        camera.location[2] = -1
+        camera.rotation_euler[0] = math.radians(180)
+        camera.rotation_euler[1] = 0
+        camera.rotation_euler[2] = 0
+        camera.data.type = 'ORTHO'
+        camera.data.ortho_scale = 1.0
+        camera.data.show_background_images = True
+
+        video = bpy.data.movieclips.load(video_path)
+        bg = camera.data.background_images.new()
+        bg.source = 'MOVIE_CLIP'
+        bg.clip = video
+        bg.rotation = math.radians(90)
+        bg.use_flip_y = True
             
     
     def execute(self, context):
@@ -190,17 +186,24 @@ class TRACK_OT_load_data(Operator, ImportHelper):
             view_results = my_tool.view_result
             frame_rate= my_tool.fps
             count = 0
-            lock_fps = my_tool.view_result
+            lock_fps = my_tool.lock_fps
             hand_side = ['hand_l', 'hand_r']
-            
+            t_hand = my_tool.t_hand
+            t_head = my_tool.t_head
+            t_pose = my_tool.t_pose
             self.load_mp_tools()
-            self.create_empty_for_every_landmark('face', 468)
-            self.create_empty_for_every_landmark(hand_side[0], 21)
-            self.create_empty_for_every_landmark(hand_side[1], 21)
-            self.create_empty_for_every_landmark('pose', 33)
+            self.create_camera(video_path)
+
+            if t_head:
+                self.create_empty_for_every_landmark('face', 478)
+            if t_hand:
+                self.create_empty_for_every_landmark(hand_side[0], 21)
+                self.create_empty_for_every_landmark(hand_side[1], 21)
+            if t_pose:
+                self.create_empty_for_every_landmark('pose', 33)
                         
             while cap.isOpened():           
-                if not lock_fps:
+                if lock_fps:
                     cap.set(cv2.CAP_PROP_POS_MSEC,(count*1000)) # doing this takes twice as long.....
                     count += (1/frame_rate)      
                 success, img = cap.read()
@@ -211,19 +214,21 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                 img = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
                 img = cv2.cvtColor(cv2.flip(img, 1), cv2.COLOR_BGR2RGB)
                 img.flags.writeable = False
-                face_results = self.face_mesh.process(img)
-                hand_results = self.hands.process(img)
-                pose_results = self.pose.process(img)
+
+                face_results = None
+                hand_results = None
+                pose_results = None
+                if t_head:
+                    face_results = self.face_mesh.process(img)
+                    self.loop_through(self.save_landmarks_xyz_to_empties, face_results.multi_face_landmarks, ['face'], frame)
+                if t_hand:
+                    hand_results = self.hands.process(img)
+                    self.loop_through(self.save_landmarks_xyz_to_empties, hand_results.multi_hand_landmarks, hand_side, frame) 
+                if t_pose:
+                    pose_results = self.pose.process(img)
+                    if pose_results.pose_landmarks:
+                        self.save_landmarks_xyz_to_empties(pose_results.pose_landmarks, 'pose', frame) 
                 
-                if view_results:
-                    img.flags.writeable = True
-                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                    self.draw_results(img, face_results, hand_results, pose_results)
-                
-                self.loop_through(self.save_landmarks_xyz_to_empties, face_results.multi_face_landmarks, ['face'], frame)
-                self.loop_through(self.save_landmarks_xyz_to_empties, hand_results.multi_hand_landmarks, hand_side, frame) 
-                if pose_results.pose_landmarks:
-                    self.save_landmarks_xyz_to_empties(pose_results.pose_landmarks, 'pose', frame) 
                 frame += 1     
             cv2.destroyAllWindows()
         return {'FINISHED'}
@@ -303,10 +308,10 @@ class TRACK_OT_track_head(Operator):
             obj.rotation_euler[2] = rot[2]
             obj.keyframe_insert(data_path="rotation_euler", frame=idx)
 
-        my_tool = context.scene.my_tool 
-        smooth_curve('head_rotation', 'rotation_euler', 0, my_tool.smoothing)
-        smooth_curve('head_rotation', 'rotation_euler', 1, my_tool.smoothing)
-        smooth_curve('head_rotation', 'rotation_euler', 2, my_tool.smoothing)
+        #my_tool = context.scene.my_tool 
+        #smooth_curve('head_rotation', 'rotation_euler', 0, my_tool.smoothing)
+        #smooth_curve('head_rotation', 'rotation_euler', 1, my_tool.smoothing)
+        #smooth_curve('head_rotation', 'rotation_euler', 2, my_tool.smoothing)
 
         return {'FINISHED'} 
 
@@ -360,9 +365,9 @@ class TRACK_OT_track_mouth(Operator):
         create_empty('mouth_height', distance_h)
 
         # smoothing
-        my_tool = context.scene.my_tool 
-        smooth_curve('mouth_width', 'location', 0, my_tool.smoothing)
-        smooth_curve('mouth_height', 'location', 0, my_tool.smoothing)
+        #my_tool = context.scene.my_tool 
+        #smooth_curve('mouth_width', 'location', 0, my_tool.smoothing)
+        #smooth_curve('mouth_height', 'location', 0, my_tool.smoothing)
 
         return {'FINISHED'} 
 
@@ -401,9 +406,9 @@ class TRACK_OT_track_blinks(Operator):
         create_empty('eye_r', distance_r)
 
         # smoothing
-        my_tool = context.scene.my_tool 
-        smooth_curve('eye_l', 'location', 0, my_tool.smoothing)
-        smooth_curve('eye_r', 'location', 0, my_tool.smoothing)
+        #my_tool = context.scene.my_tool 
+        #smooth_curve('eye_l', 'location', 0, my_tool.smoothing)
+        #smooth_curve('eye_r', 'location', 0, my_tool.smoothing)
         return {'FINISHED'}
 
 
@@ -415,134 +420,64 @@ class TRACK_OT_track_eyes(Operator):
 
     def execute(self, context):
         '''need to rewrite'''
-        my_tool = context.scene.my_tool 
-        loop_video = my_tool.loop_video
-
-        # cv2 window and slider settings        
-        cv2.namedWindow('image') 
-        cv2.createTrackbar('contrast', 'image', my_tool.alpha, 1000, nothing)
-        cv2.createTrackbar('brightness', 'image', my_tool.beta, 100, nothing)
-        cv2.createTrackbar('cut off', 'image', my_tool.cutoff, 255, nothing)   
-        cv2.createTrackbar('kernelx', 'image', my_tool.kernelx, 15, nothing) 
-        cv2.createTrackbar('kernely', 'image', my_tool.kernely, 15, nothing)  
 
         # load data
         faces = collect_data_in_collection('face') 
         faces = np.transpose(np.array(faces), (2, 0, 1))  # set data shape to frames/obj/xyz
         print(faces.shape)
-        scale = my_tool.scale
-        vid = cv2.VideoCapture(my_tool.video_path)
-        iris_location = []
-        frame = 0
-       
-        # idxs for the verts in the face mesh
-        right_eye_idx = [33,246,161,160,159,158,157,173,133,155,154,145,144,163,7]
-        left_eye_idx = [362,398,384,385,386,387,466,263,249,390,373,374,380,381,382]
-        left_brow_idx = [9,336,296,334,293,300,276,283,282,295,285,8]
-        right_brow_idx = [8,55,65,52,53,46,70,63,105,66,107,9]
+        
+        # v idx is 386 and 253
+        # eye_marker_idx = (263, 362) 
+        point1 = faces[:, 263, :2]
+        point2 = faces[:, 362, :2]
 
-        while(vid.isOpened()):
-            # read and resize img
-            ret, img = vid.read()  
-            
-            if ret:
-                img = cv2.resize(img, (int(img.shape[1] * scale), int(img.shape[0] * scale)))
-                img = cv2.flip(img, 1)
-                o_img = img
-                     
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                alpha = cv2.getTrackbarPos('contrast', 'image')
-                beta = cv2.getTrackbarPos('brightness', 'image')
-                cut = cv2.getTrackbarPos('cut off', 'image')
-                kx = cv2.getTrackbarPos('kernelx', 'image')
-                ky = cv2.getTrackbarPos('kernely', 'image')
-                img = cv2.convertScaleAbs(img, alpha=(alpha/100), beta=beta)
-                img_other = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                ret,img = cv2.threshold(img,cut,255,cv2.THRESH_BINARY_INV)
-            
-                # create mask to isolate important edges
-                mask = np.zeros(img.shape, dtype=np.uint8)
-                #mask = get_shape(landmarks, right_eye_idx, mask)
-                mask = get_shape(faces[frame], left_eye_idx, mask, kx, ky)
-                img = cv2.bitwise_and(img, mask)
-                eye_loc = find_iris(img, o_img)
-                iris_location.append(eye_loc)
-                
-                grey_3_channel = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                o_img = np.hstack([o_img, img_other, grey_3_channel])
-                frame += 1
+        # finding midpoint between 263 and 362
+        x = point2[:, 0] - point1[:, 0]  
+        x = (x*.5) + point1[:, 0] 
+        y = point2[:, 1] - point1[:, 1]  
+        y = (y*.5) + point1[:, 1] 
 
-                
-            else:
-                if loop_video:         
-                    print('no video')
-                    vid.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    frame = 0
-                else: 
-                    break
-                
-                
-            cv2.imshow('image', o_img)
-            if cv2.waitKey(1) & 0xFF == 27: 
-                break
+        # 468 and 473 are iris points. 473 being the left side
+        iris_location = faces[:, 473, :2]
 
-        cv2.destroyAllWindows() 
-        my_tool.alpha = alpha
-        my_tool.beta = beta
-        my_tool.cutoff = cut
-        my_tool.kernely = ky
-        my_tool.kernelx = kx
+        # removing head motion from iris. sort of
+        new_iris = []
+        for i in range(len(iris_location)):
+            iris_x = iris_location[i][0] - x[i]
+            iris_y = iris_location[i][1] - y[i]
+            new_iris.append([iris_x, iris_y])
 
-        if not loop_video:    
-            faces[:, :, 0] *= mask.shape[1]
-            faces[:, :, 1] *= mask.shape[0]            
-            
-            # eye_marker_idx = (263, 362) 
-            point1 = faces[:, 263, :2]
-            point2 = faces[:, 362, :2]
+        new_iris = np.array(new_iris)
+        new_iris[:, 0] -= new_iris[0][0]
+        new_iris[:, 1] -= new_iris[0][1]
 
-            x = point2[:, 0] - point1[:, 0]  
-            x = (x*.5) + point1[:, 0] 
-            y = point2[:, 1] - point1[:, 1]  
-            y = (y*.5) + point1[:, 1] 
+        new_iris[:, 1] *= -1
 
-            new_iris = []
-            for i in range(len(iris_location)):
-                iris_x = iris_location[i][0] - x[i]
-                iris_y = iris_location[i][1] - y[i]
-                new_iris.append([iris_x, iris_y])
-            
-            new_iris = np.array(new_iris)
-            new_iris[:, 0] -= new_iris[0][0]
-            new_iris[:, 1] -= new_iris[0][1]
+        x = new_iris[:, 0]
+        y = new_iris[:, 1]
+        angles = np.arctan2(y, x)
 
-            new_iris[:, 1] *= -1
+        #calulate_mag
+        mag = np.sqrt(x**2 + y**2)
+        mag_norm = norm_arr(mag, 1)
 
-            x = new_iris[:, 0]
-            y = new_iris[:, 1]
-            angles = np.arctan2(y, x)
+        x_new = []
+        y_new = []
+        for idx, angle in enumerate(angles):
+            x_new.append(math.sin(angle) * (mag_norm[idx]))
+            y_new.append(math.cos(angle) * (mag_norm[idx]))
 
-            #calulate_mag
-            mag = np.sqrt(x**2 + y**2)
-            mag_norm = norm_arr(mag, 1)
+        x_new = np.array(x_new)
+        y_new = np.array(y_new)
 
-            x_new = []
-            y_new = []
-            for idx, angle in enumerate(angles):
-                x_new.append(math.sin(angle) * (my_tool.eye_mag * mag_norm[idx]))
-                y_new.append(math.cos(angle) * (my_tool.eye_mag * mag_norm[idx]))
-
-            x_new = np.array(x_new)
-            y_new = np.array(y_new)
-
-            bpy.ops.mesh.primitive_cube_add()   
-            bpy.context.active_object.name = 'eye_pos'
-            obj = bpy.context.active_object
-            for i, x in enumerate(x_new):
-                obj.location[0] = y_new[i]
-                obj.location[1] = x
-                obj.keyframe_insert(data_path="location", frame=i)
-                
+        bpy.ops.mesh.primitive_cube_add()   
+        bpy.context.active_object.name = 'eye_pos'
+        obj = bpy.context.active_object
+        for i, x in enumerate(x_new):
+            obj.location[0] = y_new[i]
+            obj.location[1] = x
+            obj.keyframe_insert(data_path="location", frame=i)
+                        
         return {'FINISHED'}
 
 
@@ -589,35 +524,46 @@ class TRACK_OT_track_fingers(Operator):
         return {'FINISHED'}
 
 
-class VIEW3D_PT_value(bpy.types.Panel):
+class VIEW3D_PT_load_data(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'close2mocap'
-    bl_label = 'FACE MOCAP'
+    bl_label = 'close2mocap'
     
-    def draw(self, context):
-        self.layout.label(text="face tracking")
-        row = self.layout.row()
+    def draw(self, context):     
+        self.layout.label(text="processing options")
         my_tool = context.scene.my_tool
+        
+        row = self.layout.row()
         row.prop(my_tool, "fps")
+        row.prop(my_tool, "lock_fps")
         row.prop(my_tool, "scale")
-        row.prop(my_tool, "smoothing")
-        row.prop(my_tool, "eye_mag")
-        row.prop(my_tool, "view_result")
-        row.prop(my_tool, "loop_video")
-
+        
+        row = self.layout.row()
+        row.prop(my_tool, "t_head")
+        row.prop(my_tool, "t_hand")
+        row.prop(my_tool, "t_pose")
         self.layout.operator('load.data', text='select mp4 file')
+
+
+class VIEW3D_PT_track(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'close2mocap'
+    bl_label = 'track animation'
+    
+    def draw(self, context):     
         self.layout.operator('track.head', text='track head rotation')
         self.layout.operator('track.blinks', text='track blinks')
         self.layout.operator('track.mouth', text='track mouth')
         self.layout.operator('track.eyes', text='track eyes')
-        op = self.layout.operator('track.fingers', text='fingers left')
-        op.left = True
         op = self.layout.operator('track.fingers', text='fingers right')
+        op.left = True
+        op = self.layout.operator('track.fingers', text='fingers left')
         op.left = False
-        self.layout.prop_search(context.scene, "target", context.scene, "objects", text="hand")
+        self.layout.prop_search(context.scene, "target", context.scene, "objects", text="rig")
 
-        self.layout.label(text="(var * (max - min)) +  min")
+        self.layout.label(text=" normalise range formula: (var * (max - min)) +  min")
         
 
         

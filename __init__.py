@@ -39,16 +39,28 @@ def install_libs():
     os.environ.pop("PIP_REQ_TRACKER", None)
 	
     # forcing the path cause i can
-    path = sys.executable
-    path = path.split('bin')[0]
-    path = path + 'lib\site-packages'
+    version = bpy.app.version_string
+    version = int(version[2])
 
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'opencv-python', '-t', path])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', 'mediapipe', '-t', path])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'six', '-t', path])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'attrs', '-t', path])
-    subprocess.check_output([sys.executable, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib', '-t', path])
-    return {'FINISHED'}   
+    if version == 9:
+        path = sys.executable
+        path = path.split('bin')[0]
+        path = path + 'lib\site-packages'
+        python_path = sys.executable
+    else:
+        path = sys.executable
+        path = path = path.split('blender.exe')[0]
+        path =  path + '2.83\python\lib\site-packages'
+        python_path = bpy.app.binary_path_python
+
+    print('this is the path look here', path)
+    print('this is the python path', python_path)
+
+    subprocess.check_output([python_path, '-m', 'pip', 'install', 'opencv-python', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', 'mediapipe', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'six', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'attrs', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib', '-t', path])
 
 try:
     imp.find_module('mediapipe')
@@ -63,7 +75,8 @@ from .operators import  *
 classes = (
     My_settings,
     TRACK_OT_load_data,
-    VIEW3D_PT_value,
+    VIEW3D_PT_load_data,
+    VIEW3D_PT_track,
     TRACK_OT_track_head,
     TRACK_OT_track_mouth,
     TRACK_OT_track_blinks,

@@ -48,13 +48,12 @@ def install_libs():
         path = path + 'lib\site-packages'
         python_path = sys.executable
     else:
-        path = sys.executable
-        path = path = path.split('blender.exe')[0]
-        path =  path + '2.83\python\lib\site-packages'
+        path = bpy.app.binary_path_python
+        path = path.split('bin')[0]
+        path = path + 'lib\site-packages'
         python_path = bpy.app.binary_path_python
 
     print('this is the path look here', path)
-    print('this is the python path', python_path)
 
     subprocess.check_output([python_path, '-m', 'pip', 'install', 'opencv-python', '-t', path])
     subprocess.check_output([python_path, '-m', 'pip', 'install', 'mediapipe', '-t', path])
@@ -81,7 +80,8 @@ classes = (
     TRACK_OT_track_mouth,
     TRACK_OT_track_blinks,
     TRACK_OT_track_eyes,
-    TRACK_OT_track_fingers
+    TRACK_OT_track_fingers,
+    TRACK_OT_track_to_rig
 ) 
 
 

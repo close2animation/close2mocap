@@ -8,7 +8,8 @@ import cv2
 import numpy as np
 from .rotation import *
 import os
-from .distance_utils import  *
+from .eye_utils import  *
+from .rotation_quat import *
 
 bpy.types.Scene.target = bpy.props.PointerProperty(type=bpy.types.Object)
 
@@ -79,6 +80,8 @@ class My_settings(bpy.types.PropertyGroup):
     t_hand : bpy.props.BoolProperty(name='track hand', default=True)
     t_head : bpy.props.BoolProperty(name='track head', default=True)
     t_pose : bpy.props.BoolProperty(name='track pose', default=True)
+    invert : bpy.props.BoolProperty(name='invert y and z', default=True)
+    inverse : bpy.props.BoolProperty(name='invert direction', default=True)
 
 
 class TRACK_OT_load_data(Operator, ImportHelper):  
@@ -159,7 +162,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
         bg = camera.data.background_images.new()
         bg.source = 'MOVIE_CLIP'
         bg.clip = video
-        bg.rotation = math.radians(90)
+        bg.rotation = math.radians(180)
         bg.use_flip_y = True
             
     
@@ -212,7 +215,8 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                     
                 # process img
                 img = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
-                img = cv2.cvtColor(cv2.flip(img, 1), cv2.COLOR_BGR2RGB)
+                #img = cv2.cvtColor(cv2.flip(img, 1), cv2.COLOR_BGR2RGB)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img.flags.writeable = False
 
                 face_results = None
@@ -524,6 +528,114 @@ class TRACK_OT_track_fingers(Operator):
         return {'FINISHED'}
 
 
+class TRACK_OT_track_to_rig(Operator):
+    ''' '''
+    bl_idname = "track.rig" 
+    bl_label = "tracks to rig" 
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        my_tool = context.scene.my_tool
+        # lazy method for now
+        # head --------------------------------------------------------------------------------------------
+
+        # load data
+        data_face = collect_data_in_collection('face')
+        data_face = data_face[:468]
+        # set data shape to frames/obj/xyz
+        faces = np.transpose(np.array(data_face), (2, 0, 1))
+        faces = move_to_world_origin(faces, 168)
+
+        p1 = faces[:, 9]
+        p2 = faces[:, 244]
+
+        quats = generate_quaternion_batch(p1, p2)
+        offsets = offset_quat(quats, quats[0])
+
+
+        # test with many
+        verts = np.transpose(faces, (1, 0, 2))
+        rotations = np.zeros((verts.shape[1], 4))
+        for i, vert in enumerate(verts[:3]):
+            
+            print('p1 and verts')
+            print(p1.shape)
+            print(vert.shape)
+            quats = generate_quaternion_batch(p1, vert)
+            offsets = offset_quat(quats, quats[0])
+            rotations += np.array(offsets)
+
+        print(offsets)
+        rotations = rotations / (i+1)
+        rotations = normalise_vector_batch(rotations)
+        obj = bpy.context.scene.target
+        apply_rotation_to_rig_quat(rotations, obj, False)
+
+
+        #body ---------------------------------------------------------------------
+        data_face = collect_data_in_collection('pose')
+        # set data shape to frames/obj/xyz
+        data_pose = np.transpose(np.array(data_face), (2, 0, 1))
+        data_pose = data_pose
+
+        # shoulder points
+        left = data_pose[:, 11]
+        right = data_pose[:, 12]
+        middle_top = get_middle_point_2d(left, right)
+
+        # making target sideways since bone we using to control is perpendicular to line we're rotating
+        # e.g    shoulder line --->    *------------*
+        #                                    |
+        #                                    |
+        #                   bone line --->   |
+        target = np.array([1, 0, 0])
+        quats_top = slope_angle_2d(right[:, :2], left[:, :2], target)
+
+        # middle point between waist 
+        left = data_pose[:, 24]
+        right = data_pose[:, 23]
+        middle_bot = get_middle_point_2d(left, right)
+
+        # bot coors are actually higher since the camera looks upwards not downwards
+        # so we make target negative
+        target = np.array([0, -1, 0])
+        quats_bot = slope_angle_2d(middle_bot, middle_top, target)
+
+        if my_tool.inverse:
+            d1 = True
+            d2 = False
+        else:
+            d1 = False
+            d2 = True
+        
+        if my_tool.invert:
+            quats_bot[:, [3, 2]] = quats_bot[:, [2, 3]]
+            quats_top[:, [3, 2]] = quats_top[:, [2, 3]]
+
+        apply_quaternion_to_bone(quats_bot, obj, 'torso', d1)
+        apply_quaternion_to_bone(quats_bot, obj, 'chest', d2)
+        add_rotation_q_to_bone(quats_top, obj, 'chest', d1)
+
+        
+        # shoulder points again
+        left = data_pose[:, 11]
+        right = data_pose[:, 12]
+
+        # drop y axis
+        left = np.delete(left, 1, axis=1)
+        right = np.delete(right, 1, axis=1)
+        target = np.array([1, 0, 0])
+        quats = slope_angle_2d(right, left, target)
+
+        if not my_tool.invert: 
+            quats[:, [3,2]] = quats[:,[2,3]]
+
+        add_rotation_q_to_bone(quats, obj, 'torso', d2)
+
+        return {'FINISHED'}
+        
+
+
 class VIEW3D_PT_load_data(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -552,16 +664,24 @@ class VIEW3D_PT_track(bpy.types.Panel):
     bl_category = 'close2mocap'
     bl_label = 'track animation'
     
-    def draw(self, context):     
+    def draw(self, context): 
+        my_tool = context.scene.my_tool    
         self.layout.operator('track.head', text='track head rotation')
         self.layout.operator('track.blinks', text='track blinks')
         self.layout.operator('track.mouth', text='track mouth')
         self.layout.operator('track.eyes', text='track eyes')
+        
         op = self.layout.operator('track.fingers', text='fingers right')
         op.left = True
         op = self.layout.operator('track.fingers', text='fingers left')
         op.left = False
+
+        
         self.layout.prop_search(context.scene, "target", context.scene, "objects", text="rig")
+        self.layout.operator('track.rig', text='track to rig')
+        row = self.layout.row()
+        row.prop(my_tool, "invert")
+        row.prop(my_tool, "inverse")
 
         self.layout.label(text=" normalise range formula: (var * (max - min)) +  min")
         

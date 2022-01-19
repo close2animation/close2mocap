@@ -42,16 +42,10 @@ def install_libs():
     version = bpy.app.version_string
     version = int(version[2])
 
-    if version == 9:
-        path = sys.executable
-        path = path.split('bin')[0]
-        path = path + 'lib\site-packages'
-        python_path = sys.executable
-    else:
-        path = bpy.app.binary_path_python
-        path = path.split('bin')[0]
-        path = path + 'lib\site-packages'
-        python_path = bpy.app.binary_path_python
+    path = sys.executable
+    path = path.split('bin')[0]
+    path = path + 'lib\site-packages'
+    python_path = sys.executable
 
     print('this is the path look here', path)
 
@@ -75,13 +69,16 @@ classes = (
     My_settings,
     TRACK_OT_load_data,
     VIEW3D_PT_load_data,
-    VIEW3D_PT_track,
+    VIEW3D_PT_track_to_cube,
+    VIEW3D_PT_track_to_rig,
     TRACK_OT_track_head,
     TRACK_OT_track_mouth,
     TRACK_OT_track_blinks,
     TRACK_OT_track_eyes,
     TRACK_OT_track_fingers,
-    TRACK_OT_track_to_rig
+    TRACK_OT_track_to_body,
+    TRACK_OT_track_to_head,
+    TRACK_OT_create_animation
 ) 
 
 

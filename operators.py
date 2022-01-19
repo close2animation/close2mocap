@@ -10,6 +10,7 @@ from .rotation import *
 import os
 from .eye_utils import  *
 from .rotation_quat import *
+from .blend_utils import *
 
 bpy.types.Scene.target = bpy.props.PointerProperty(type=bpy.types.Object)
 
@@ -51,8 +52,6 @@ def smooth_curve(object_name, transform_type='location', axis=2, kernel_size=10)
     for idx, keyframe in enumerate(keyframes[start:-start]):
         keyframes.insert(keyframe.co[0], sma[idx], options={'FAST'}, keyframe_type='KEYFRAME')
 
-
-
     data = []
     for obj in bpy.data.collections[name].objects:
         fcurves = get_specific_fcurves(obj, 'location', 'all')
@@ -82,6 +81,7 @@ class My_settings(bpy.types.PropertyGroup):
     t_pose : bpy.props.BoolProperty(name='track pose', default=True)
     invert : bpy.props.BoolProperty(name='invert y and z', default=True)
     inverse : bpy.props.BoolProperty(name='invert direction', default=True)
+    single_eye: bpy.props.BoolProperty(name='single_eye', default=True)
 
 
 class TRACK_OT_load_data(Operator, ImportHelper):  
@@ -131,7 +131,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
         also need to check if landsmarks exist.
         '''  
         if not landmark_list:
-            print(f'no results in frame{frame} for {name}')
+            #print(f'no results in frame{frame} for {name}')
             pass
         else:
             try:
@@ -142,10 +142,12 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                 pass
 
     
-    def create_camera(self, video_path):    
+    def create_camera(self, video_path):  
+        bpy.ops.object.mode_set(mode='OBJECT')  
         bpy.ops.object.camera_add()
-        bpy.data.scenes['Scene'].render.resolution_x = 1000
-        bpy.data.scenes['Scene'].render.resolution_y = 1000
+        scene = bpy.context.scene
+        scene.render.resolution_x = 1000
+        scene.render.resolution_y = 1000
         camera = bpy.context.active_object
         camera.name = 'visualise points'
         camera.location[0] = .5
@@ -198,11 +200,14 @@ class TRACK_OT_load_data(Operator, ImportHelper):
             self.create_camera(video_path)
 
             if t_head:
+                print('creating empties for head')
                 self.create_empty_for_every_landmark('face', 478)
             if t_hand:
+                print('creating empties for hands')
                 self.create_empty_for_every_landmark(hand_side[0], 21)
                 self.create_empty_for_every_landmark(hand_side[1], 21)
             if t_pose:
+                print('creating empties for body')
                 self.create_empty_for_every_landmark('pose', 33)
                         
             while cap.isOpened():           
@@ -212,7 +217,7 @@ class TRACK_OT_load_data(Operator, ImportHelper):
                 success, img = cap.read()
                 if not success:
                     break
-                    
+                print(f'processing frame:{frame}') 
                 # process img
                 img = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
                 #img = cv2.cvtColor(cv2.flip(img, 1), cv2.COLOR_BGR2RGB)
@@ -324,15 +329,16 @@ class TRACK_OT_track_mouth(Operator):
     bl_idname = "track.mouth" 
     bl_label = "tracks mouth rotation" 
     bl_options = {'UNDO'}
+    to_rig : bpy.props.BoolProperty()
 
     def execute(self, context):
         '''
         lip points:
         -eyes
 
-        *         *
+          *         *
         *   *  362*   *263
-        *         *
+          *         *
 
         -mouth
             *13
@@ -345,6 +351,7 @@ class TRACK_OT_track_mouth(Operator):
         data_face = collect_data_in_collection('face')
         # set data shape to frames/obj/xyz
         faces = np.transpose(np.array(data_face), (2, 0, 1))
+        my_tool = context.scene.my_tool
 
         mouth_idx = [13 ,14, 78, 308, 362, 263]
         mouth_width = [78, 308] 
@@ -364,9 +371,52 @@ class TRACK_OT_track_mouth(Operator):
         distance_w = norm_arr(mags_width, scale)
         distance_h = norm_arr(mags_height, scale)
 
-        # create cube that'll be used as a driver
-        create_empty('mouth_width', distance_w)
-        create_empty('mouth_height', distance_h)
+        if self.to_rig:
+            obj = bpy.context.scene.target
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='POSE')
+            actions = bpy.data.actions
+            action_open = actions['mouth_open']
+            action_closed = actions['mouth_closed']
+            action_wide = actions['mouth_wide']
+            action_pucker = actions['mouth_pucker']
+            data_paths = delete_unchanging_fcurves(action_open, action_closed)
+            actions.new('mouth_v')
+            actions.new('mouth_h')
+            if obj.animation_data is None:
+                obj.animation_data_create()
+
+            obj.animation_data.action = actions['mouth_v']
+            select_asset_in_browser(bpy.context.area, action_closed)
+            for i, (scale_w, scale_h) in enumerate(zip(distance_w, distance_h)):
+                scale_w = 1 - scale_w
+                scale_h = 1 - scale_h
+                blend_between_poses(scale_h, action_open, action_closed, obj)
+                keyframe_selected_bones(i)
+
+            select_asset_in_browser(bpy.context.area, action_closed, True)
+            obj.animation_data_clear()
+            delete_data_paths_from_action(data_paths, actions['mouth_v'])
+            data_paths = delete_unchanging_fcurves(action_wide, action_pucker)
+
+            if obj.animation_data is None:
+                obj.animation_data_create()
+            obj.animation_data.action = actions['mouth_h']
+            select_asset_in_browser(bpy.context.area, action_pucker)
+            for i, (scale_w, scale_h) in enumerate(zip(distance_w, distance_h)):
+                scale_w = 1 - scale_w
+                scale_h = 1 - scale_h
+                blend_between_poses(scale_w, action_wide, action_pucker, obj)
+                keyframe_selected_bones(i)
+
+            delete_data_paths_from_action(data_paths, actions['mouth_h'])
+            select_asset_in_browser(bpy.context.area, action_closed, True)
+            obj.animation_data_clear()
+
+        else:
+            # create cube that'll be used as a driver
+            create_empty('mouth_width', distance_w)
+            create_empty('mouth_height', distance_h)
 
         # smoothing
         #my_tool = context.scene.my_tool 
@@ -380,13 +430,15 @@ class TRACK_OT_track_blinks(Operator):
     bl_idname = "track.blinks" 
     bl_label = "tracks eyelids" 
     bl_options = {'UNDO'}
+    to_rig : bpy.props.BoolProperty()
+    single_eye : bpy.props.BoolProperty()
 
     def execute(self, context):
         # load data
         data_face = collect_data_in_collection('face')
         # set data shape to frames/obj/xyz
         faces = np.transpose(np.array(data_face), (2, 0, 1))
-
+        my_tool = context.scene.my_tool
         # top dowm
         left_eye = [386, 374]
         right_eye = [159, 145]
@@ -399,15 +451,62 @@ class TRACK_OT_track_blinks(Operator):
 
         # get scale
         min = np.min(mags_scale)
+        print('min', min)
         scale = mags_scale / min
+        print('scale', scale)
+        scale = scale - 1
+        print('scale', scale)
 
-        # get normalised distance
-        distance_l = norm_arr(mags_left, scale)
-        distance_r = norm_arr(mags_right, scale)
+        min = np.min(mags_left)
+        print('min', min)
+        scale_l = scale * min
+        print('scale', scale) 
+        mags_left = mags_left - scale_l 
 
-        # create cube that'll be used as a driver
-        create_empty('eye_l', distance_l)
-        create_empty('eye_r', distance_r)
+        min = np.min(mags_right)
+        print('min', min)
+        scale_r = scale * min
+        print('scale', scale) 
+        mags_right = mags_left - scale_r
+
+        distance_l = norm_arr(mags_left, 1)
+        distance_r = norm_arr(mags_right, 1)
+        
+
+        if self.to_rig:
+            actions = bpy.data.actions
+            obj = bpy.context.scene.target
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='POSE')
+            open_action = actions['eyes_open']
+            close_action = actions['eyes_closed']
+            data_paths = delete_unchanging_fcurves(open_action, close_action)
+            actions.new('blinking')
+
+            if obj.animation_data is None:
+                obj.animation_data_create()
+
+            obj.animation_data.action = actions['blinking']
+
+            select_asset_in_browser(bpy.context.area, close_action)
+            for i, (scale_l, scale_r) in enumerate(zip(distance_l, distance_r)):
+                if my_tool.single_eye:
+                    scale_l = scale_r
+
+                scale_l = 1 - scale_l
+                scale_r = 1 - scale_r
+
+                blend_between_poses(scale_l, open_action, close_action, obj)
+                keyframe_selected_bones(i)
+        
+            select_asset_in_browser(bpy.context.area, close_action, True)
+            obj.animation_data_clear()
+            delete_data_paths_from_action(data_paths, actions['blinking'])
+
+        else:
+            # create cube that'll be used as a driver
+            create_empty('eye_l', distance_l)
+            create_empty('eye_r', distance_r)
 
         # smoothing
         #my_tool = context.scene.my_tool 
@@ -422,9 +521,12 @@ class TRACK_OT_track_eyes(Operator):
     bl_label = "tracks eyes" 
     bl_options = {'UNDO'}
 
+    to_rig : bpy.props.BoolProperty()
+    
+
     def execute(self, context):
         '''need to rewrite'''
-
+        my_tool = context.scene.my_tool
         # load data
         faces = collect_data_in_collection('face') 
         faces = np.transpose(np.array(faces), (2, 0, 1))  # set data shape to frames/obj/xyz
@@ -471,16 +573,78 @@ class TRACK_OT_track_eyes(Operator):
             x_new.append(math.sin(angle) * (mag_norm[idx]))
             y_new.append(math.cos(angle) * (mag_norm[idx]))
 
-        x_new = np.array(x_new)
-        y_new = np.array(y_new)
 
-        bpy.ops.mesh.primitive_cube_add()   
-        bpy.context.active_object.name = 'eye_pos'
-        obj = bpy.context.active_object
-        for i, x in enumerate(x_new):
-            obj.location[0] = y_new[i]
-            obj.location[1] = x
-            obj.keyframe_insert(data_path="location", frame=i)
+        x_new, y_new = np.array(y_new), np.array(x_new)
+
+        if self.to_rig:
+            actions = bpy.data.actions
+            obj = bpy.context.scene.target
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='POSE')
+            bone_group = actions['eyes_left'].groups[0] # this is right
+            bone_name = bone_group.name
+
+            for fcurve in bone_group.channels:
+                if fcurve.data_path.split('.')[-1] != 'location':
+                    continue
+                if fcurve.array_index == 0:
+                    max_x = fcurve.evaluate(0)
+                
+            bone_group = actions['eyes_up'].groups[0]
+            bone_name = bone_group.name       
+            for fcurve in bone_group.channels:
+                if fcurve.data_path.split('.')[-1] != 'location':
+                    continue
+                if fcurve.array_index == 2:
+                    max_z = fcurve.evaluate(0)
+                if fcurve.array_index == 1:
+                    max_y = fcurve.evaluate(0)
+
+            # up axis different for rigs
+            up_axis = 2
+            if max_y > max_z:     
+                max_z = max_y
+                up_axis = 1
+
+            print('max zzzz', max_z)
+
+            y_array = y_new 
+            print('y_array', y_array[:5])   
+            y_max = np.max(np.abs(y_array))
+            y_array = y_array / y_max
+            y_array *= max_z 
+                
+            x_array = x_new
+            print('x_array', x_array[:5]) 
+            x_max = np.max(np.abs(x_array))
+            x_array = x_array / x_max
+            x_array *= max_x
+
+
+            actions = bpy.data.actions
+            actions.new('look_around')
+
+            if obj.animation_data is None:
+                obj.animation_data_create()
+
+            obj.animation_data.action = actions['look_around']
+            for i, (x, y) in enumerate(zip(x_array, y_array)):
+                obj.pose.bones[bone_name].location[0] = -x
+                obj.pose.bones[bone_name].location[up_axis] = y
+                obj.pose.bones[bone_name].keyframe_insert(data_path='location', frame=i)
+
+            select_asset_in_browser(bpy.context.area, actions['look_around'], True)
+            obj.animation_data_clear()
+            
+
+        else:
+            bpy.ops.mesh.primitive_cube_add()   
+            bpy.context.active_object.name = 'eye_pos'
+            obj = bpy.context.active_object
+            for i, x in enumerate(x_new):
+                obj.location[0] = x
+                obj.location[1] = y_new[i]
+                obj.keyframe_insert(data_path="location", frame=i)
                         
         return {'FINISHED'}
 
@@ -528,13 +692,15 @@ class TRACK_OT_track_fingers(Operator):
         return {'FINISHED'}
 
 
-class TRACK_OT_track_to_rig(Operator):
+class TRACK_OT_track_to_head(Operator):
     ''' '''
-    bl_idname = "track.rig" 
-    bl_label = "tracks to rig" 
+    bl_idname = "track.head_auto" 
+    bl_label = "tracks to head" 
     bl_options = {'UNDO'}
+    to_rig : bpy.props.BoolProperty()
 
     def execute(self, context):
+        obj = bpy.context.scene.target
         my_tool = context.scene.my_tool
         # lazy method for now
         # head --------------------------------------------------------------------------------------------
@@ -551,16 +717,27 @@ class TRACK_OT_track_to_rig(Operator):
 
         quats = generate_quaternion_batch(p1, p2)
         offsets = offset_quat(quats, quats[0])
+        idx_list = [26, 47, 112, 114, 121, 126, 128, 131, 133, 134, 154,
+                    155, 174, 188, 198, 209, 217, 232, 233, 236, 243, 244,
+                    277, 341, 343, 350, 355, 357, 360, 362, 363, 382, 398, 399,
+                    412, 414, 420, 429, 437, 452, 453, 456, 463, 464, 465]
 
+        actions = bpy.data.actions
+        actions.new('head')
+        if obj.animation_data is None:
+            obj.animation_data_create()
+        
+        obj.animation_data.action = actions['head']
 
         # test with many
         verts = np.transpose(faces, (1, 0, 2))
         rotations = np.zeros((verts.shape[1], 4))
-        for i, vert in enumerate(verts[:3]):
+        for i, vert_idx in enumerate(idx_list):
             
-            print('p1 and verts')
-            print(p1.shape)
-            print(vert.shape)
+            #print('p1 and verts')
+            #print(p1.shape)
+            #print(vert.shape)
+            vert = verts[vert_idx]
             quats = generate_quaternion_batch(p1, vert)
             offsets = offset_quat(quats, quats[0])
             rotations += np.array(offsets)
@@ -571,7 +748,21 @@ class TRACK_OT_track_to_rig(Operator):
         obj = bpy.context.scene.target
         apply_rotation_to_rig_quat(rotations, obj, False)
 
+        select_asset_in_browser(bpy.context.area, actions['head'], True)
+        obj.animation_data_clear()
+        return {'FINISHED'}
+        
 
+class TRACK_OT_track_to_body(Operator):
+    ''' '''
+    bl_idname = "track.body" 
+    bl_label = "tracks to body" 
+    bl_options = {'UNDO'}
+    to_rig : bpy.props.BoolProperty()
+
+    def execute(self, context):
+        obj = bpy.context.scene.target
+        my_tool = context.scene.my_tool
         #body ---------------------------------------------------------------------
         data_face = collect_data_in_collection('pose')
         # set data shape to frames/obj/xyz
@@ -633,7 +824,26 @@ class TRACK_OT_track_to_rig(Operator):
         add_rotation_q_to_bone(quats, obj, 'torso', d2)
 
         return {'FINISHED'}
-        
+
+
+class TRACK_OT_create_animation(Operator):
+    ''' '''
+    bl_idname = "track.create_animation" 
+    bl_label = "creates nla tracks" 
+    bl_options = {'UNDO'}
+    to_rig : bpy.props.BoolProperty()
+
+    def execute(self, context):
+        action_list = ['blinking', 'mouth_v', 'mouth_h', 'look_around', 'head']
+        obj = bpy.context.scene.target
+        obj.animation_data_create()
+        actions = bpy.data.actions
+        for action in action_list:
+            if actions.find(action) == -1:
+                continue
+            add_track_with_action(obj.animation_data, actions[action])
+
+        return {'FINISHED'}
 
 
 class VIEW3D_PT_load_data(bpy.types.Panel):
@@ -658,16 +868,17 @@ class VIEW3D_PT_load_data(bpy.types.Panel):
         self.layout.operator('load.data', text='select mp4 file')
 
 
-class VIEW3D_PT_track(bpy.types.Panel):
+class VIEW3D_PT_track_to_cube(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'close2mocap'
-    bl_label = 'track animation'
+    bl_label = 'track animation to cube'
     
     def draw(self, context): 
         my_tool = context.scene.my_tool    
         self.layout.operator('track.head', text='track head rotation')
-        self.layout.operator('track.blinks', text='track blinks')
+        op = self.layout.operator('track.blinks', text='track blinks')
+        op.to_rig = False
         self.layout.operator('track.mouth', text='track mouth')
         self.layout.operator('track.eyes', text='track eyes')
         
@@ -676,14 +887,39 @@ class VIEW3D_PT_track(bpy.types.Panel):
         op = self.layout.operator('track.fingers', text='fingers left')
         op.left = False
 
-        
+
+class VIEW3D_PT_track_to_rig(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'close2mocap'
+    bl_label = 'track animation to rigify'
+    
+    def draw(self, context): 
+        my_tool = context.scene.my_tool 
         self.layout.prop_search(context.scene, "target", context.scene, "objects", text="rig")
-        self.layout.operator('track.rig', text='track to rig')
+        self.layout.operator('track.body', text='track to body')
         row = self.layout.row()
         row.prop(my_tool, "invert")
         row.prop(my_tool, "inverse")
 
-        self.layout.label(text=" normalise range formula: (var * (max - min)) +  min")
+        self.layout.label(text='eyes_open, eyes_closed')
+        op = self.layout.operator('track.blinks', text='track blinks')
+        op.to_rig = True
+        #row = self.layout.row()
+        #row.prop(my_tool, "single_eye")
+        self.layout.label(text='eyes_left, eyes_up')
+        op = self.layout.operator('track.eyes', text='track eyes')
+        op.to_rig = True
+        self.layout.label(text='mouth_wide, mouth_pucker, mouth_closed, mouth_open')
+        op = self.layout.operator('track.mouth', text='track mouth')
+        op.to_rig = True
         
+        op = self.layout.operator('track.head_auto', text='track head')
+        op.to_rig = True
 
+        op = self.layout.operator('track.create_animation', text='create animation')
+
+        self.layout.label(text='bpy.data.actions.remove(bpy.data.actions[action name])')
+
+        
         
